@@ -72,7 +72,7 @@ def crop_cells(image, rows, cols):
     return cells
 
 # ========== Step 5: 匹配识别单元格 ==========
-def recognize_cell(cell_img, templates, threshold=0.8):
+def recognize_cell(cell_img, templates, threshold=0.75):
     best_score = 0
     best_match = None
     for family, level, tpl in templates:
@@ -90,12 +90,12 @@ def recognize_cell(cell_img, templates, threshold=0.8):
     else:
         return Cell(family="?", level=0)
 
+
 # ========== Step 6: 主循环 ==========
-print("🔍 开始识别沙盘状态，每隔 8 秒刷新一次...（Ctrl+C 退出）")
+print("🔍 开始识别沙盘状态...（Ctrl+C 退出）")
 
 try:
     while True:
-        time.sleep(3)
         x1, y1 = sandbox_top_left
         x2, y2 = sandbox_bottom_right
         img_pil = ImageGrab.grab(bbox=(x1, y1, x2, y2))
@@ -106,24 +106,49 @@ try:
 
         # 识别每个格子
         result = []
+        has_unrecognized = False
         for row in grid_imgs:
-            result_row = [recognize_cell(cell, templates) for cell in row]
+            result_row = []
+            for cell in row:
+                recognized = recognize_cell(cell, templates)
+                if recognized.family == "?":
+                    has_unrecognized = True
+                result_row.append(recognized)
             result.append(result_row)
 
-        # 打印结果
-        print("🎯 当前沙盘识别结果：")
-        for row in result:
-            print(" ".join(str(cell) for cell in row))
+        if not has_unrecognized:
+            # 打印结果
+            print("🎯 当前沙盘识别结果：")
+            for row in result:
+                print(" ".join(str(cell) for cell in row))
 
-        # 构建 GameBoard 并调用推荐逻辑
-        board = GameBoard(result)
-        swap, combos = board.find_best_swap()
+            # 构建 GameBoard 并调用推荐逻辑
+            board = GameBoard(result)
+            swap, combos = board.find_best_swap()
 
-        if swap:
-            print(f"💡 推荐交换: {swap}（x行x列，从上到下从左到右）\n可触发合成数: {combos}")
+            if swap:
+                print(f"💡 推荐交换: {swap}（x行x列，从上到下从左到右）\n可触发合成数: {combos}")
+            else:
+                print("⚠️ 当前无有效合成交换")
+            print("\n---\n")
+            cell_w = (sandbox_bottom_right[0] - sandbox_top_left[0]) // cols
+            cell_h = (sandbox_bottom_right[1] - sandbox_top_left[1]) // rows
+
+            # 获取需要标注的格子位置（从1开始转成从0开始）
+            swap_cells = [(swap[0][0]-1, swap[0][1]-1), (swap[1][0]-1, swap[1][1]-1)]
+
+            # 显示浮动红框
+            rects = []
+            for r, c in swap_cells:
+                x = (sandbox_top_left[0] + c * cell_w)/2
+                y = (sandbox_top_left[1] + r * cell_h)/2
+                rects.append((x, y, cell_w/2, cell_h/2))
+
+            # 启动 overlay.py 子进程显示红框（避免主线程卡死）
+            subprocess.run(["python3", "overlay.py", str(rects)])
+            time.sleep(2)
         else:
-            print("⚠️ 当前无有效合成交换")
-        print("\n---\n")
+            time.sleep(0.5)
 
 except KeyboardInterrupt:
     print("🛑 已手动终止识别程序。")
